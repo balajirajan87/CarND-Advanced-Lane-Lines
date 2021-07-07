@@ -273,7 +273,7 @@ For calculating the Deviation of the Vehicle from the lane centre , the xfit of 
 ### Pipeline (video)
 
 Here's a link to my video result
-![alt text][video1]
+[video1]
 ---
 
 ### Discussion

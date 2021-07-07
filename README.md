@@ -267,7 +267,7 @@ For calculating the Deviation of the Vehicle from the lane centre , the xfit of 
     centre = xFitRight_Bottom - xFitLeft_Bottom
     image_centre = image[:,:,0].shape[1]/2
     Offset = (image_centre - centre) * xm_per_pix
-	
+```	
 
 ![alt text][image20]
 
@@ -276,7 +276,7 @@ For calculating the Deviation of the Vehicle from the lane centre , the xfit of 
 ### Pipeline (video)
 
 Here's a link to my video result
-![alt text][video1]
+[video1]
 ---
 
 ### Discussion
