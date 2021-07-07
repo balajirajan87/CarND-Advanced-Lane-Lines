@@ -31,13 +31,15 @@ class Line():
         # x values of the last n fits of the line
         self.recent_xfitted = [] 
         #average x values of the fitted line over the last n iterations
-        self.bestx = None     
+        self.bestx = np.array([], dtype='float64')      
         #polynomial coefficients averaged over the last n iterations
-        self.best_fit = None  
+        self.best_fit = np.array([], dtype='float64')  
         #polynomial coefficients for the most recent fit
         self.current_fit = [np.array([False])]  
         #radius of curvature of the line in some units
         self.radius_of_curvature = None 
+        #radius of curvature filtered of the line in some units
+        self.radius_of_curvature_filt = np.float64(0)
         #distance in meters of vehicle center from the line
         self.line_base_pos = None 
         #difference in fit coefficients between last and new fits
@@ -52,22 +54,23 @@ class Frame():
         self.FrameCount = 0
         
 
-#instantiate the classes
+#instantiate the classes and define the Global Variables
 global ObjLeft_lane, ObjRight_lane
 global framecounter
 global mtx, dist
 global ym_per_pix, xm_per_pix
 global hue_thresholds, saturation_thresholds, xGrad_Thresholds, yGrad_Thresholds, AvgGrad_Threshlds, DirGrad_Thresholds
 global kernel_size
+global factor_avg_lanes
+global factor_avg_rad
 
 ObjLeft_lane = Line()
 ObjRight_lane = Line()
 framecounter = Frame()
 
-#the first step --> caliberate the camera
-#mtx, dist = caliberate_camera()
-mtx = np.array([[1157.78,0,667.114],[0,1152.82,386.125],[0,0,1]])
-dist = np.array([[-0.246885,-0.0237315,-0.00109831,0.00035107,-0.00259868]])
+#mtx = np.array([[1157.78,0,667.114],[0,1152.82,386.125],[0,0,1]])
+#dist = np.array([[-0.246885,-0.0237315,-0.00109831,0.00035107,-0.00259868]])
+
 #Define some constants..
 ym_per_pix = 30/720 # meters per pixel in y dimension
 xm_per_pix = 3.7/700 # meters per pixel in x dimension
@@ -78,6 +81,8 @@ yGrad_Thresholds = [100,200]
 AvgGrad_Threshlds = [50,200]
 DirGrad_Thresholds = [0.7,1.5]
 kernel_size = 3
+factor_avg_lanes = 0.5
+factor_avg_rad = 0.1
 
 
 def caliberate_camera():
@@ -97,7 +102,7 @@ def caliberate_camera():
     imgpoints = [] # 2d points in image plane.
     
     # Make a list of calibration images
-    images = glob.glob('camera_cal/calibration*.jpg')
+    images = glob.glob('camera_cal/*.jpg')
     
     # Step through the list and search for chessboard corners
     for idx, fname in enumerate(images):
@@ -122,11 +127,13 @@ def caliberate_camera():
             dst = cv2.undistort(img, mtx, dist, None, mtx)
             write_name = 'output_images/Calibration_output/corners_found'+str(idx)+'.jpg'
             cv2.imwrite(write_name,dst)
+            """
             f, (ax1, ax2) = plt.subplots(1, 2, figsize=(20,10))
             ax1.imshow(img)
             ax1.set_title('Original Image', fontsize=30)
             ax2.imshow(dst)
             ax2.set_title('Undistorted Image', fontsize=30)
+            """
             cv2.waitKey(500)
     
     cv2.destroyAllWindows()
@@ -150,6 +157,8 @@ def undistort_image(img,mtx,dist):
     
     """
     undist = cv2.undistort(img, mtx, dist, None, mtx)
+    plt.imsave("output_images/original_distorted_image.jpg", img)
+    plt.imsave("output_images/undistorted_image.jpg", undist)
     return undist
 
 def colour_gradient_transform(image, hue_thresh=(10, 30), sat_thresh=(150, 190), sx_thresh=(20, 80), sy_thresh=(20, 80), sAvg_thresh=(20, 80), sDir_thresh=(0, np.pi/2), kernel_size=3):
@@ -192,12 +201,16 @@ def colour_gradient_transform(image, hue_thresh=(10, 30), sat_thresh=(150, 190),
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=kernel_size) # Take the derivative in x
     sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=kernel_size) # Take the derivative in y
     abs_sobel_x = np.absolute(sobelx) # Absolute x derivative to accentuate lines away from horizontal
+    plt.imsave("output_images/sobel_binary_x_dir.jpg", abs_sobel_x,cmap="gray")
     abs_sobel_y = np.absolute(sobely) # Absolute y derivative to accentuate lines away from vertical
+    plt.imsave("output_images/sobel_binary_y_dir.jpg", abs_sobel_y,cmap="gray")
     scaled_sobel_x = np.uint8(255*abs_sobel_x/np.max(abs_sobel_x))
     scaled_sobel_y = np.uint8(255*abs_sobel_y/np.max(abs_sobel_y))
     abs_sobel = np.sqrt(np.square(sobelx) + np.square(sobely))
     scaled_abs_sobel = np.uint8(255*abs_sobel/np.max(abs_sobel))
+    plt.imsave("output_images/scaled_sobel_xy.jpg", scaled_abs_sobel,cmap="gray")
     dir_grad = np.arctan2(abs_sobel_y,abs_sobel_x)
+    plt.imsave("output_images/dir_grad.jpg", dir_grad,cmap="gray")
 
     sxbinary = np.zeros_like(scaled_sobel_x)
     sxbinary[(scaled_sobel_x >= sx_thresh[0]) & (scaled_sobel_x <= sx_thresh[1])] = 1
@@ -205,10 +218,13 @@ def colour_gradient_transform(image, hue_thresh=(10, 30), sat_thresh=(150, 190),
     sybinary[(scaled_sobel_y >= sy_thresh[0]) & (scaled_sobel_y <= sy_thresh[1])] = 1
     sAvgbinary = np.zeros_like(scaled_abs_sobel)
     sAvgbinary[(scaled_abs_sobel >= sAvg_thresh[0]) & (scaled_abs_sobel <= sAvg_thresh[1])] = 1
+    plt.imsave("output_images/sAvgBinary_image.jpg", sAvgbinary, cmap="gray")
     sDirbinary = np.zeros_like(dir_grad)
     sDirbinary[(dir_grad >= sDir_thresh[0]) & (dir_grad <= sDir_thresh[1])] = 1
+    plt.imsave("output_images/sDirBinary_image.jpg", sDirbinary, cmap="gray")
     sGradBinary = np.zeros_like(gray)
     sGradBinary[((sAvgbinary == 1) & (sDirbinary == 1))] = 1
+    plt.imsave("output_images/sGradBinary_image.jpg", sGradBinary, cmap="gray")
     """
     Now work on Color Channels
     """
@@ -219,8 +235,13 @@ def colour_gradient_transform(image, hue_thresh=(10, 30), sat_thresh=(150, 190),
     total_binary = np.zeros_like(hls[:,:,2])
     sat_binary[(hls[:,:,2] >= sat_thresh[0]) & (hls[:,:,2] <= sat_thresh[1])] = 1
     hue_binary[(hls[:,:,0] >= hue_thresh[0]) & (hls[:,:,0] <= hue_thresh[1])] = 1
+    plt.imsave("output_images/Hue_binary.jpg", hue_binary, cmap="gray")
+    plt.imsave("output_images/Sat_binary.jpg", sat_binary, cmap="gray")
     color_binary[(sat_binary == 1) | (hue_binary == 1)] = 1
+    plt.imsave("output_images/color_binary.jpg", color_binary, cmap="gray")
     total_binary[((color_binary == 1) | (sGradBinary == 1))] = 1
+    plt.imsave("output_images/total_binary_image.jpg", total_binary,cmap="gray")
+    
     return total_binary
 
 def perspective_transform(img):
@@ -286,6 +307,7 @@ def perspective_transform(img):
     ax1.plot(290,720,'.')
     ax2.imshow(warped, cmap='gray')
     """
+    plt.imsave("output_images/warped_binary_image.jpg", warped,cmap="gray")
     # Return the resulting image and matrix
     return warped, M, Minv
 
@@ -402,17 +424,30 @@ def find_lane_pixels(binary_warped):
 
 def fit_polynomial(binary_warped):
     """
-    
+    This Function is used to generate the polynomials and the associated Left and Right xFits and yFits.
+    This Function depends on find_lane_pixels() function to generate the x and y values of the pixels 
+    identified, and from those values generates a polynomial of 2nd order. From the polynomial we generate
+    the xFits for left and right fits. If xFits are greater than a threshold, then we say that lanes are found.
 
     Parameters
     ----------
-    binary_warped : TYPE
+    binary_warped : TYPE: Binary image of 0s and 1s
         DESCRIPTION.
 
     Returns
     -------
-    out_img : TYPE
-        DESCRIPTION.
+    left_fitx : ndarray
+        DESCRIPTION: x coordinates of the polynomial fitted.
+    right_fitx : ndarray
+        DESCRIPTION: x coordinates of the polynomial fitted.
+    left_lanes_found : Bool
+        DESCRIPTION: set to TRUE if the Lanes are found
+    right_lanes_found : Bool
+        DESCRIPTION: set to TRUE if the Lanes are found
+    left_fit_poly : ndarray
+        DESCRIPTION: Actual polynomial coefficients
+    right_fit_poly : ndarray
+        DESCRIPTION: Actual polynomial coefficients
 
     """
     # Find our lane pixels first
@@ -441,6 +476,7 @@ def fit_polynomial(binary_warped):
     # Plots the left and right polynomials on the lane lines
     plt.plot(left_fitx, ploty, color='yellow')
     plt.plot(right_fitx, ploty, color='yellow')
+    plt.imsave("output_images/Left_right_lanes_detected.jpg", out_img, cmap="gray")
     
     #Check if the lanes are found or not found
     if ((len(leftx_pix) > 0) & (len(lefty_pix) > 0)):
@@ -456,33 +492,8 @@ def fit_polynomial(binary_warped):
 
 def fit_poly_new(img_shape, leftx_incr, lefty_incr, rightx_incr, righty_incr):
     """
-    
-
-    Parameters
-    ----------
-    img_shape : TYPE
-        DESCRIPTION.
-    leftx : TYPE
-        DESCRIPTION.
-    lefty : TYPE
-        DESCRIPTION.
-    rightx : TYPE
-        DESCRIPTION.
-    righty : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    left_fit_new : TYPE
-        DESCRIPTION.
-    left_fit_new : TYPE
-        DESCRIPTION.
-    left_fitx : TYPE
-        DESCRIPTION.
-    right_fitx : TYPE
-        DESCRIPTION.
-    ploty : TYPE
-        DESCRIPTION.
+    This function finds out the new polynomial and the new xFits from the previous
+    x and y data incremented with a margin (100 default value)
 
     """
     ### TO-DO: Fit a second order polynomial to each with np.polyfit() ###
@@ -500,37 +511,12 @@ def fit_poly_new(img_shape, leftx_incr, lefty_incr, rightx_incr, righty_incr):
         left_fitx_new = 1*ploty**2 + 1*ploty
         right_fitx_new = 1*ploty**2 + 1*ploty
     
-    return left_fit_new, left_fit_new, left_fitx_new, right_fitx_new, ploty
+    return left_fit_new, right_fit_new, left_fitx_new, right_fitx_new, ploty
 
 def search_around_poly(binary_warped,Left_Fit,Right_Fit):
     """
-    
-
-    Parameters
-    ----------
-    binary_warped : TYPE
-        DESCRIPTION.
-    Left_Fit : TYPE
-        DESCRIPTION.
-    Right_Fit : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    result : TYPE
-        DESCRIPTION.
-    left_fitx : TYPE
-        DESCRIPTION.
-    right_fitx : TYPE
-        DESCRIPTION.
-    left_lanes_found : TYPE
-        DESCRIPTION.
-    right_lanes_found : TYPE
-        DESCRIPTION.
-    left_fit_new : TYPE
-        DESCRIPTION.
-    right_fit_new : TYPE
-        DESCRIPTION.
+    This function finds out the new polynomial and the new xFits from the previous
+    x and y data incremented with a margin (100 default value)
 
     """
     # HYPERPARAMETER
@@ -588,57 +574,13 @@ def search_around_poly(binary_warped,Left_Fit,Right_Fit):
     else:
         right_lanes_found_new = False
     
-    """
-    ## Visualization ##
-    # Create an image to draw on and an image to show the selection window
-    out_img = np.dstack((binary_warped, binary_warped, binary_warped))*255
-    window_img = np.zeros_like(out_img)
-    # Color in left and right line pixels
-    out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
-    out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
-
-    # Generate a polygon to illustrate the search window area
-    # And recast the x and y points into usable format for cv2.fillPoly()
-    left_line_window1 = np.array([np.transpose(np.vstack([left_fitx-margin, ploty]))])
-    left_line_window2 = np.array([np.flipud(np.transpose(np.vstack([left_fitx+margin, 
-                              ploty])))])
-    left_line_pts = np.hstack((left_line_window1, left_line_window2))
-    right_line_window1 = np.array([np.transpose(np.vstack([right_fitx-margin, ploty]))])
-    right_line_window2 = np.array([np.flipud(np.transpose(np.vstack([right_fitx+margin, 
-                              ploty])))])
-    right_line_pts = np.hstack((right_line_window1, right_line_window2))
-
-    # Draw the lane onto the warped blank image
-    cv2.fillPoly(window_img, np.int_([left_line_pts]), (0,255, 0))
-    cv2.fillPoly(window_img, np.int_([right_line_pts]), (0,255, 0))
-    result = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
-    
-    # Plot the polynomial lines onto the image
-    plt.plot(left_fitx, ploty, color='yellow')
-    plt.plot(right_fitx, ploty, color='yellow')
-    ## End visualization steps ##
-    """
-    
     return left_fitx_new, right_fitx_new, left_lanes_found_new, right_lanes_found_new, left_fit_new, right_fit_new
 
 def image_reMap(binary_warped,left_fitx,right_fitx,Minv,undist):
     """
-    
-
-    Parameters
-    ----------
-    warped : TYPE
-        DESCRIPTION.
-    left_fitx : TYPE
-        DESCRIPTION.
-    right_fitx : TYPE
-        DESCRIPTION.
-    ploty : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    None.
+    This function maps the detected Lanes and the polygon back to the original 
+    undistorted image. This uses Inverse perspective Transform matrix calculated in 
+    perspective_transform() step.
 
     """
     
@@ -663,62 +605,30 @@ def image_reMap(binary_warped,left_fitx,right_fitx,Minv,undist):
     right_line_pts = np.hstack((right_line_window1, right_line_window2))
 
     # Draw the lane onto the warped blank image
-    cv2.fillPoly(window_img, np.int_([left_line_pts]), (0,0, 255))
-    cv2.fillPoly(window_img, np.int_([right_line_pts]), (255,0, 0))
-    
+    cv2.fillPoly(window_img, np.int_([left_line_pts]), (255,0,0))
+    cv2.fillPoly(window_img, np.int_([right_line_pts]), (0,0,255))
+    out_img = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
+    plt.imsave("output_images/lane_lines.jpg", out_img)
     # Recast the x and y points into usable format for cv2.fillPoly()
     pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
     pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
     pts = np.hstack((pts_left, pts_right))
     
     # Draw the lane onto the warped blank image
-    cv2.fillPoly(window_img, np.int_([pts]), (0,255, 0))
-    
+    cv2.fillPoly(out_img, np.int_([pts]), (0,255, 0))
+    plt.imsave("output_images/lane_lines_with_polygon.jpg", out_img)
     # Warp the blank back to original image space using inverse perspective matrix (Minv)
-    newwarp = cv2.warpPerspective(window_img, Minv, (window_img.shape[1], window_img.shape[0])) 
+    newwarp = cv2.warpPerspective(out_img, Minv, (window_img.shape[1], window_img.shape[0]),flags=cv2.INTER_LINEAR) 
     # Combine the result with the original image
     result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
+    plt.imsave("output_images/lanes_remaped_undistorted.jpg", result)
     plt.imshow(result)
-    """
-    # Create an image to draw the lines on
-    warp_zero = np.zeros_like(binary_warped).astype(np.uint8)
-    color_warp = np.dstack((warp_zero, warp_zero, warp_zero))*255
-    ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0])
-    # Recast the x and y points into usable format for cv2.fillPoly()
-    pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
-    pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
-    pts = np.hstack((pts_left, pts_right))
     
-    # Draw the lane onto the warped blank image
-    cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
-    
-    # Warp the blank back to original image space using inverse perspective matrix (Minv)
-    newwarp = cv2.warpPerspective(color_warp, Minv, (binary_warped.shape[1], binary_warped.shape[0])) 
-    # Combine the result with the original image
-    result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
-    plt.imshow(result)
-    """
     return result
 
 def generate_data_real(ym_per_pix, xm_per_pix,image):
     """
-    
-
-    Parameters
-    ----------
-    ym_per_pix : TYPE
-        DESCRIPTION.
-    xm_per_pix : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    TYPE
-        DESCRIPTION.
-    left_fit_cr : TYPE
-        DESCRIPTION.
-    right_fit_cr : TYPE
-        DESCRIPTION.
+    This function generates the Real world equivalent of Left and Right fit datas and also y datas
 
     """
     leftx = ObjLeft_lane.recent_xfitted
@@ -739,14 +649,12 @@ def generate_data_real(ym_per_pix, xm_per_pix,image):
 
 def measure_curvature_real(image):
     """
-    
-
-    Returns
-    -------
-    left_curverad : TYPE
-        DESCRIPTION.
-    right_curverad : TYPE
-        DESCRIPTION.
+    This function takes in the output of generate_data_real() which are left and right fits (corrected ones)
+    and then calculates the Left and the right radius of curvature from the formula:
+        
+        Rcurve ​= (1+(2Ay+B)2)3/2​
+                 ---------------
+                     ∣2A∣
 
     """
     # Start by generating our fake example data
@@ -761,33 +669,15 @@ def measure_curvature_real(image):
     left_curverad = np.sqrt((np.square((2*left_fit_cr[0]*y_eval) + left_fit_cr[1]) + 1)**3)/(2*left_fit_cr[0])
     right_curverad = np.sqrt((np.square((2*right_fit_cr[0]*y_eval) + right_fit_cr[1]) + 1)**3)/(2*right_fit_cr[0])
     
-    overall_radius = np.abs((left_curverad + right_curverad) * 0.5)
-    
-    return left_curverad, right_curverad, overall_radius
+    return left_curverad, right_curverad
 
 def find_distance_from_lanecentre(xFitLeft, xFitRight, ym_per_pix, xm_per_pix, image):
     """
-    
+    This function is used to calculate the Distance of the vehicle from the lane centre
+    this function uses the xFits of both the left and the right lanes, and also the 
+    exact image midpoint from:- image.shape[1]/2 and from these datas and also from 
+    pixel to real world mapping we find the distance of the vehicle from the lane centre
 
-    Parameters
-    ----------
-    left_curverad : TYPE
-        DESCRIPTION.
-    right_curverad : TYPE
-        DESCRIPTION.
-    image : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    Offset : TYPE
-        DESCRIPTION.
-
-    """
-    """
-    centre = np.abs(left_curverad - right_curverad) * 0.5
-    image_centre = np.int(image[:,:,0].shape[0]//2) * xm_per_pix
-    Offset_raw = centre - image_centre
     """
     
     xFitLeft_Bottom = xFitLeft[len(xFitLeft) - 1]
@@ -800,17 +690,7 @@ def find_distance_from_lanecentre(xFitLeft, xFitRight, ym_per_pix, xm_per_pix, i
 
 def process_image(image):
     """
-    
-
-    Parameters
-    ----------
-    image : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    projected_image : TYPE
-        DESCRIPTION.
+    The main image processing pipeline
 
     """
     # NOTE: The output you return should be a color image (3 channel) for processing video below
@@ -833,6 +713,10 @@ def process_image(image):
         ObjRight_lane.recent_xfitted = right_fitx
         ObjRight_lane.detected = right_lanes_found
         ObjRight_lane.current_fit = right_fit_poly
+        ObjLeft_lane.bestx = ObjLeft_lane.recent_xfitted
+        ObjRight_lane.bestx = ObjRight_lane.recent_xfitted
+        ObjLeft_lane.best_fit = ObjLeft_lane.current_fit
+        ObjRight_lane.best_fit = ObjRight_lane.current_fit
     else:
         left_fitx_new, right_fitx_new, left_lanes_found_new, right_lanes_found_new, left_fit_poly_new, right_fit_poly_new = search_around_poly(warped_image,ObjLeft_lane.current_fit,ObjRight_lane.current_fit)
         ObjLeft_lane.recent_xfitted = left_fitx_new
@@ -841,12 +725,19 @@ def process_image(image):
         ObjRight_lane.recent_xfitted = right_fitx_new
         ObjRight_lane.detected = right_lanes_found_new
         ObjRight_lane.current_fit = right_fit_poly_new
+        # calculate the average of the xFits and poly over frames
+        ObjLeft_lane.bestx = ObjLeft_lane.bestx - (factor_avg_lanes * (ObjLeft_lane.bestx - ObjLeft_lane.recent_xfitted))
+        ObjRight_lane.bestx = ObjRight_lane.bestx - (factor_avg_lanes * (ObjRight_lane.bestx - ObjRight_lane.recent_xfitted))
+        ObjLeft_lane.best_fit = ObjLeft_lane.best_fit - (factor_avg_lanes * (ObjLeft_lane.best_fit - ObjLeft_lane.current_fit))
+        ObjRight_lane.best_fit = ObjRight_lane.best_fit - (factor_avg_lanes * (ObjRight_lane.best_fit - ObjRight_lane.current_fit))
     #Project back the Polynomial on to the Images
-    #undist_gray = cv2.cvtColor(undist_img, cv2.COLOR_RGB2GRAY)
-    projected_image = image_reMap(warped_image,ObjLeft_lane.recent_xfitted,ObjRight_lane.recent_xfitted,inv_persp_matrix,undist_img)
-    #FIND THE RADIUS OF CURVATURE
-    ObjLeft_lane.radius_of_curvature, ObjRight_lane.radius_of_curvature, overall_radius = measure_curvature_real(projected_image)
-    distance_from_centre = find_distance_from_lanecentre(ObjLeft_lane.recent_xfitted, ObjRight_lane.recent_xfitted, ym_per_pix, xm_per_pix, projected_image)
+    projected_image = image_reMap(warped_image,ObjLeft_lane.bestx,ObjRight_lane.bestx,inv_persp_matrix,undist_img)
+    #FIND THE RADIUS OF CURVATURE and filter the same.
+    ObjLeft_lane.radius_of_curvature, ObjRight_lane.radius_of_curvature = measure_curvature_real(projected_image)
+    ObjLeft_lane.radius_of_curvature_filt = ObjLeft_lane.radius_of_curvature_filt - (factor_avg_rad * (ObjLeft_lane.radius_of_curvature_filt - ObjLeft_lane.radius_of_curvature))
+    ObjRight_lane.radius_of_curvature_filt = ObjRight_lane.radius_of_curvature_filt - (factor_avg_rad * (ObjRight_lane.radius_of_curvature_filt - ObjRight_lane.radius_of_curvature))
+    overall_radius = np.abs((ObjLeft_lane.radius_of_curvature_filt + ObjRight_lane.radius_of_curvature_filt) * 0.5)
+    distance_from_centre = find_distance_from_lanecentre(ObjLeft_lane.bestx, ObjRight_lane.bestx, ym_per_pix, xm_per_pix, projected_image)
     #embed the text in the image
     text1 = "The Radius of Curvature is: " + str(overall_radius) + "meters"
     if (distance_from_centre < 0):
@@ -861,21 +752,12 @@ def process_image(image):
     cv2.putText(projected_image,text3,(10,200), cv2.FONT_HERSHEY_COMPLEX, 0.9,(255,255,255),2,cv2.LINE_AA)
     cv2.putText(projected_image,text4,(10,250), cv2.FONT_HERSHEY_COMPLEX, 0.9,(255,255,255),2,cv2.LINE_AA)
     cv2.putText(projected_image,text5,(10,300), cv2.FONT_HERSHEY_COMPLEX, 0.9,(255,255,255),2,cv2.LINE_AA)
+    plt.imsave("output_images/final_image_withData.jpg", projected_image)
     return projected_image
 
-
+#the first step --> caliberate the camera
+mtx, dist = caliberate_camera()
 Video_op_path = "C:\\Users\\bra6cob\\Documents\\GitHub\\CarND-Advanced-Lane-Lines\\test_video_outputs\\project_video_output.mp4"
 clip = VideoFileClip("C:\\Users\\bra6cob\\Documents\\GitHub\\CarND-Advanced-Lane-Lines\\project_video.mp4")
-Raw_clip = clip.fl_image(process_image).subclip(0,5)
+Raw_clip = clip.fl_image(process_image).subclip(10,30)
 Raw_clip.write_videofile(Video_op_path, audio=False)
-"""
-clip = clip.subclip(0, 1)
-frames = clip.iter_frames()
-framecounter = 0
-for value in frames:
-    image = plt.imshow(value)
-    img = image._A
-    framecounter = framecounter + 1
-    projected_image = process_image(img)
-    print(framecounter)
-"""
