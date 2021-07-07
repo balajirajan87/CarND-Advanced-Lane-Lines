@@ -263,7 +263,8 @@ For calculating the Deviation of the Vehicle from the lane centre , the xfit of 
     centre = xFitRight_Bottom - xFitLeft_Bottom
     image_centre = image[:,:,0].shape[1]/2
     Offset = (image_centre - centre) * xm_per_pix
-	
+
+```
 
 ![alt text][image20]
 
